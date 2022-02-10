@@ -75,7 +75,8 @@ def main():
 
     model = torch.nn.DataParallel(model).cuda()
     model = model.cuda()
-    load_file = os.path.join(os.path.abspath(os.path.dirname(__file__)),
+    prefix = "../TransBTS_outputs/"
+    load_file = os.path.join(prefix,
                              'checkpoint', args.experiment+args.test_date, args.test_file)
 
     if os.path.exists(load_file):
