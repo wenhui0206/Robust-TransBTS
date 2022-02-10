@@ -120,7 +120,7 @@ def transform(sample):
 
 def transform_valid(sample):
     trans = transforms.Compose([
-        Pad(),
+        # Pad(),
         # MaxMinNormalization(),
         ToTensor()
     ])
@@ -154,6 +154,8 @@ class BraTS(Dataset):
             return sample['image'], sample['label']
         elif self.mode == 'valid':
             image, label = pkload(path + 'data_f32b0.pkl')
+            image = np.pad(image, ((0, 0), (0, 0), (0, 5), (0, 0)), mode='constant')
+            # only pad the image, do not pad the target
             sample = {'image': image, 'label': label}
             sample = transform_valid(sample)
             return sample['image'], sample['label']

@@ -188,6 +188,8 @@ def main_worker():
             adjust_learning_rate(optimizer, epoch, args.end_epoch, args.lr)
 
             x, target = data
+            print(target.shape, x.shape)
+            pdb.set_trace()
             x = x.cuda(args.local_rank, non_blocking=True)
             target = target.cuda(args.local_rank, non_blocking=True)
 

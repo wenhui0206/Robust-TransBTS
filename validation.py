@@ -62,6 +62,8 @@ parser.add_argument('--gpu', default='0', type=str)
 
 parser.add_argument('--num_workers', default=4, type=int)
 
+parser.add_argument('--output_root', default="../TransBTS_outputs/", type=str)
+
 args = parser.parse_args()
 
 
@@ -75,7 +77,7 @@ def main():
 
     model = torch.nn.DataParallel(model).cuda()
     model = model.cuda()
-    prefix = "../TransBTS_outputs/"
+    prefix = args.output_root
     load_file = os.path.join(prefix,
                              'checkpoint', args.experiment+args.test_date, args.test_file)
 
@@ -95,9 +97,9 @@ def main():
 
     valid_loader = DataLoader(valid_set, batch_size=1, shuffle=False, num_workers=args.num_workers, pin_memory=True)
 
-    submission = os.path.join(os.path.abspath(os.path.dirname(__file__)), args.output_dir,
+    submission = os.path.join(prefix, args.output_dir,
                               args.submission, args.experiment+args.test_date)
-    visual = os.path.join(os.path.abspath(os.path.dirname(__file__)), args.output_dir,
+    visual = os.path.join(prefix, args.output_dir,
                           args.visual, args.experiment+args.test_date)
 
     if not os.path.exists(submission):

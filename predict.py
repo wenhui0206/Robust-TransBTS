@@ -183,12 +183,12 @@ def validate_performance(
 
         output = output[0, :, :H, :W, :T].cpu().detach().numpy()
         output = output.argmax(0)
-        seg_img = np.zeros(shape=(H, W, T), dtype=np.uint8)
-        seg_img[np.where(output == 1)] = 1
-        seg_img[np.where(output == 2)] = 2
-        seg_img[np.where(output == 3)] = 4
+        # seg_img = np.zeros(shape=(H, W, T), dtype=np.uint8)
+        # seg_img[np.where(output == 1)] = 1
+        # seg_img[np.where(output == 2)] = 2
+        # seg_img[np.where(output == 3)] = 4
 
-        dices = softmax_output_dice(seg_img, target.cpu().numpy())
+        dices = softmax_output_dice(output, target.cpu().numpy())
         print(dices)
 
         name = str(i)
