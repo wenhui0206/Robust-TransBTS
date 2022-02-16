@@ -115,7 +115,7 @@ def validate_performance(
 
     runtimes = []
     ET_voxels_pred_list = []
-
+    dices_all = []
     for i, data in enumerate(valid_loader):
         print('-------------------------------------------------------------------')
         msg = 'Subject {}/{}, '.format(i + 1, len(valid_loader))
@@ -183,13 +183,9 @@ def validate_performance(
 
         output = output[0, :, :H, :W, :T].cpu().detach().numpy()
         output = output.argmax(0)
-        # seg_img = np.zeros(shape=(H, W, T), dtype=np.uint8)
-        # seg_img[np.where(output == 1)] = 1
-        # seg_img[np.where(output == 2)] = 2
-        # seg_img[np.where(output == 3)] = 4
-
         dices = softmax_output_dice(output, target.cpu().numpy())
         print(dices)
+        dices_all.append(dices)
 
         name = str(i)
         if names:
@@ -237,9 +233,9 @@ def validate_performance(
                         # scipy.misc.imsave(os.path.join(visual, name, str(frame)+'.png'), Snapshot_img[:, :, :, frame])
                         imageio.imwrite(os.path.join(visual, name, str(frame)+'.png'), Snapshot_img[:, :, :, frame])
 
-
+    dices_all = np.array(dices_all)
+    print("Mean dice for each class: ", np.mean(dices_all, axis=0))
     print('runtimes:', sum(runtimes)/len(runtimes))
-
 
 
 def validate_softmax(

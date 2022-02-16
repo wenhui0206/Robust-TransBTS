@@ -34,9 +34,9 @@ parser.add_argument('--visual', default='visualization', type=str)
 
 parser.add_argument('--experiment', default='TransBTS', type=str)
 
-parser.add_argument('--test_date', default='2022-01-31', type=str)
+parser.add_argument('--test_date', default='2022-02-09', type=str)
 
-parser.add_argument('--test_file', default='model_epoch_9.pth', type=str)
+parser.add_argument('--test_file', default='model_epoch_249.pth', type=str)
 
 parser.add_argument('--use_TTA', default=False, type=bool)
 
