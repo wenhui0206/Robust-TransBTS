@@ -113,7 +113,7 @@ class TransformerBTS(nn.Module):
     def decode(self, x):
         raise NotImplementedError("Should be implemented in child class!!")
 
-    def forward(self, x, auxillary_output_layers=[1, 2, 3, 4]):
+    def forward(self, x, auxillary_output_layers=[1]):
 
         x1_1, x2_1, x3_1, encoder_output, intmd_encoder_outputs = self.encode(x)
 
@@ -201,7 +201,7 @@ class BTS(TransformerBTS):
         self.endconv = nn.Conv3d(self.embedding_dim // 32, 4, kernel_size=1)
 
 
-    def decode(self, x1_1, x2_1, x3_1, x, intmd_x, intmd_layers=[1, 2, 3, 4]):
+    def decode(self, x1_1, x2_1, x3_1, x, intmd_x, intmd_layers=[1]):
 
         assert intmd_layers is not None, "pass the intermediate layers for MLA"
         encoder_outputs = {}
@@ -324,7 +324,7 @@ def TransBTS(dataset='brats', _conv_repr=True, _pe_type="learned"):
 
     num_channels = 4
     patch_dim = 8
-    aux_layers = [1, 2, 3, 4]
+    aux_layers = [1]
     model = BTS(
         img_dim,
         patch_dim,
