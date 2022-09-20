@@ -129,17 +129,13 @@ def transform_valid(sample):
 
 
 class BraTS(Dataset):
-    def __init__(self, list_file, root='', mode='train'):
+    def __init__(self, names, root='', mode='train'):
         self.lines = []
-        paths, names = [], []
-        with open(list_file) as f:
-            for line in f:
-                line = line.strip()
-                name = line.split('/')[-1]
-                names.append(name)
-                path = os.path.join(root, line, name + '_')
-                paths.append(path)
-                self.lines.append(line)
+        paths = []
+        for name in names:
+            path = os.path.join(root, name, name + '_')
+            paths.append(path)
+            self.lines.append(name)
         self.mode = mode
         self.names = names
         self.paths = paths
@@ -174,4 +170,51 @@ class BraTS(Dataset):
         return [torch.cat(v) for v in zip(*batch)]
 
 
+class BraTS_noisy(Dataset):
+    def __init__(self, names, root='', mode='train', corrupt_r=0.5, fold=0):
+        self.lines = []
+        paths = []
+        for name in names:
+            path = os.path.join(root, name, name + '_')
+            paths.append(path)
+            self.lines.append(name)
+        self.mode = mode
+        self.names = names
+        self.paths = paths
+        self.pct_train = int(10 - corrupt_r*10)
+        if fold > 0:
+            self.fold_name = '_f' + str(fold)
+        else:
+            self.fold_name = ''
+
+
+    def __getitem__(self, item):
+        path = self.paths[item]
+        if self.mode == 'train':
+            image, _ = pkload(path + 'data_f32b0.pkl')
+            # label = pkload(path + 'noisy_label_f32b0.pkl') # noisy label
+            label = pkload(path + 'noisy_label_0.' + str(self.pct_train) + self.fold_name + '.pkl')
+            sample = {'image': image, 'label': label}
+            sample = transform(sample)
+            return sample['image'], sample['label']
+        elif self.mode == 'valid':
+            image, label = pkload(path + 'data_f32b0.pkl')
+            image = np.pad(image, ((0, 0), (0, 0), (0, 5), (0, 0)), mode='constant')
+            # only pad the image, do not pad the target
+            sample = {'image': image, 'label': label}
+            sample = transform_valid(sample)
+            return sample['image'], sample['label']
+        else:
+            image = pkload(path + 'data_f32b0.pkl')
+            image = np.pad(image, ((0, 0), (0, 0), (0, 5), (0, 0)), mode='constant')
+            image = np.ascontiguousarray(image.transpose(3, 0, 1, 2))
+            image = torch.from_numpy(image).float()
+            return image
+
+
+    def __len__(self):
+        return len(self.names)
+
+    def collate(self, batch):
+        return [torch.cat(v) for v in zip(*batch)]
 
