@@ -15,6 +15,7 @@ from data.BraTS import BraTS
 from predict import validate_softmax
 from models.TransBTS.TransBTS_downsample8x_skipconnection import TransBTS
 
+# output segmentation predictions, does not calculate performance
 
 parser = argparse.ArgumentParser()
 

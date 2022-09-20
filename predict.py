@@ -8,7 +8,8 @@ cudnn.benchmark = True
 import numpy as np
 import nibabel as nib
 import imageio
-
+from scipy import ndimage
+import pandas as pd
 
 
 def one_hot(ori, classes):
@@ -90,6 +91,66 @@ def softmax_output_dice(output, target):
 
     return ret
 
+def border_map(binary_img, neigh):
+    """
+    Creates the border for a 3D image
+    """
+    binary_map = np.asarray(binary_img, dtype=np.uint8)
+    neigh = neigh
+    west = ndimage.shift(binary_map, [-1, 0,0], order=0)
+    east = ndimage.shift(binary_map, [1, 0,0], order=0)
+    north = ndimage.shift(binary_map, [0, 1,0], order=0)
+    south = ndimage.shift(binary_map, [0, -1,0], order=0)
+    top = ndimage.shift(binary_map, [0, 0, 1], order=0)
+    bottom = ndimage.shift(binary_map, [0, 0, -1], order=0)
+    cumulative = west + east + north + south + top + bottom
+    border = ((cumulative < 6) * binary_map) == 1
+    return border
+
+
+def border_distance(ref, seg):
+    """
+    This functions determines the map of distance from the borders of the
+    segmentation and the reference and the border maps themselves
+    """
+    neigh=8
+    border_ref = border_map(ref, neigh)
+    border_seg = border_map(seg, neigh)
+    oppose_ref = 1 - ref
+    oppose_seg = 1 - seg
+    # euclidean distance transform
+    distance_ref = ndimage.distance_transform_edt(oppose_ref)
+    distance_seg = ndimage.distance_transform_edt(oppose_seg)
+    distance_border_seg = border_ref * distance_seg
+    distance_border_ref = border_seg * distance_ref
+    return distance_border_ref, distance_border_seg#, border_ref, border_seg
+
+def Hausdorff_distance(ref, seg):
+    """
+    This functions calculates the average symmetric distance and the
+    hausdorff distance between a segmentation and a reference image
+    :return: hausdorff distance and average symmetric distance
+    """
+    ref_border_dist, seg_border_dist = border_distance(ref,seg)
+    hausdorff_distance = np.max(
+        [np.max(ref_border_dist), np.max(seg_border_dist)])
+    return hausdorff_distance
+
+def hausdorff_whole (seg,ground):
+    return Hausdorff_distance(seg==0, ground==0)
+
+def hausdorff_en (seg,ground):
+    seg_ = np.copy(seg)
+    seg_[seg_ == 3] = 4
+    return Hausdorff_distance(seg_!=4, ground!=4)
+
+def hausdorff_core (seg,ground):
+    seg_=np.copy(seg)
+    ground_=np.copy(ground)
+    seg_[seg_==2]=0
+    ground_[ground_==2]=0
+    return Hausdorff_distance(seg_==0, ground_==0)
+
 
 keys = 'whole', 'core', 'enhancing', 'loss'
 
@@ -108,14 +169,16 @@ def validate_performance(
         visual='',  # the path to save visualization
         postprocess=False,  # Default False, when use postprocess, the score of dice_ET would be changed.
         valid_in_train=False,  # if you are valid when train
-        ):
+        csv_name="results.csv",
+        fp="/scratch1/wenhuicu/robust_seg/TransBTS_outputs/csv_results/"):
 
-    H, W, T = 240, 240, 160
+    H, W, T = 240, 240, 155
     model.eval()
 
     runtimes = []
     ET_voxels_pred_list = []
     dices_all = []
+    hds = []
     for i, data in enumerate(valid_loader):
         print('-------------------------------------------------------------------')
         msg = 'Subject {}/{}, '.format(i + 1, len(valid_loader))
@@ -184,8 +247,14 @@ def validate_performance(
         output = output[0, :, :H, :W, :T].cpu().detach().numpy()
         output = output.argmax(0)
         dices = softmax_output_dice(output, target.cpu().numpy())
-        print(dices)
         dices_all.append(dices)
+        print(target.shape, output.shape)
+        # print(dices)
+        target = target.cpu().numpy()[0]
+        [hd_whole, hd_core, hd_en] = hausdorff_whole(output, target), hausdorff_core(output, target), hausdorff_en(output, target)
+        
+        print("Hausdorff Distance: ", [hd_whole, hd_core, hd_en])
+        hds.append([hd_whole, hd_core, hd_en])
 
         name = str(i)
         if names:
@@ -232,10 +301,171 @@ def validate_performance(
                             os.makedirs(os.path.join(visual, name))
                         # scipy.misc.imsave(os.path.join(visual, name, str(frame)+'.png'), Snapshot_img[:, :, :, frame])
                         imageio.imwrite(os.path.join(visual, name, str(frame)+'.png'), Snapshot_img[:, :, :, frame])
-
+    
     dices_all = np.array(dices_all)
-    print("Mean dice for each class: ", np.mean(dices_all, axis=0))
+    mean_dices = np.mean(dices_all, axis=0)
+    mean_hds = np.mean(np.array(hds), axis=0)
+    print("Mean dice for each class: ", mean_dices)
+    print("Mean Hausdorff Distance: ", mean_hds)
+
+    if csv_name != '':
+        df = pd.DataFrame(np.concatenate((mean_dices, mean_hds)).reshape((1, 6)), columns=["WT dice", "TC dice", "ET dice", "WT hd", "TC hd", "ET hd"])
+        df.to_csv(fp + csv_name)
     print('runtimes:', sum(runtimes)/len(runtimes))
+
+
+def compare_performance(
+        valid_loader,
+        model,
+        load_file,
+        multimodel,
+        savepath='',  # when in validation set, you must specify the path to save the 'nii' segmentation results here
+        names=None,  # The names of the patients orderly!
+        verbose=False,
+        use_TTA=False,  # Test time augmentation, False as default!
+        save_format=None,  # ['nii','npy'], use 'nii' as default. Its purpose is for submission.
+        snapshot=False,  # for visualization. Default false. It is recommended to generate the visualized figures.
+        visual='',  # the path to save visualization
+        postprocess=False,  # Default False, when use postprocess, the score of dice_ET would be changed.
+        valid_in_train=False,  # if you are valid when train
+        fname='dice.txt'):
+
+
+    H, W, T = 240, 240, 155
+    model.eval()
+
+    runtimes = []
+    ET_voxels_pred_list = []
+    dices_all = []
+    
+    for i, data in enumerate(valid_loader):
+        print('-------------------------------------------------------------------')
+        msg = 'Subject {}/{}, '.format(i + 1, len(valid_loader))
+        if valid_in_train:
+            data = [t.cuda(non_blocking=True) for t in data]
+            x, target = data[:2]
+        else:
+            x = data
+            x.cuda()
+
+        if not use_TTA:
+            torch.cuda.synchronize()  # add the code synchronize() to correctly count the runtime.
+            start_time = time.time()
+            logit = tailor_and_concat(x, model)
+
+            torch.cuda.synchronize()
+            elapsed_time = time.time() - start_time
+            logging.info('Single sample test time consumption {:.2f} minutes!'.format(elapsed_time/60))
+            runtimes.append(elapsed_time)
+
+
+            if multimodel:
+                logit = F.softmax(logit, dim=1)
+                output = logit / 4.0
+
+                load_file1 = load_file.replace('7998', '7996')
+                if os.path.isfile(load_file1):
+                    checkpoint = torch.load(load_file1)
+                    model.load_state_dict(checkpoint['state_dict'])
+                    print('Successfully load checkpoint {}'.format(load_file1))
+                    logit = tailor_and_concat(x, model)
+                    logit = F.softmax(logit, dim=1)
+                    output += logit / 4.0
+                load_file1 = load_file.replace('7998', '7997')
+                if os.path.isfile(load_file1):
+                    checkpoint = torch.load(load_file1)
+                    model.load_state_dict(checkpoint['state_dict'])
+                    print('Successfully load checkpoint {}'.format(load_file1))
+                    logit = tailor_and_concat(x, model)
+                    logit = F.softmax(logit, dim=1)
+                    output += logit / 4.0
+                load_file1 = load_file.replace('7998', '7999')
+                if os.path.isfile(load_file1):
+                    checkpoint = torch.load(load_file1)
+                    model.load_state_dict(checkpoint['state_dict'])
+                    print('Successfully load checkpoint {}'.format(load_file1))
+                    logit = tailor_and_concat(x, model)
+                    logit = F.softmax(logit, dim=1)
+                    output += logit / 4.0
+            else:
+                output = F.softmax(logit, dim=1)
+
+
+        else:
+            x = x[..., :155]
+            logit = F.softmax(tailor_and_concat(x, model), 1)  # no flip
+            logit += F.softmax(tailor_and_concat(x.flip(dims=(2,)), model).flip(dims=(2,)), 1)  # flip H
+            logit += F.softmax(tailor_and_concat(x.flip(dims=(3,)), model).flip(dims=(3,)), 1)  # flip W
+            logit += F.softmax(tailor_and_concat(x.flip(dims=(4,)), model).flip(dims=(4,)), 1)  # flip D
+            logit += F.softmax(tailor_and_concat(x.flip(dims=(2, 3)), model).flip(dims=(2, 3)), 1)  # flip H, W
+            logit += F.softmax(tailor_and_concat(x.flip(dims=(2, 4)), model).flip(dims=(2, 4)), 1)  # flip H, D
+            logit += F.softmax(tailor_and_concat(x.flip(dims=(3, 4)), model).flip(dims=(3, 4)), 1)  # flip W, D
+            logit += F.softmax(tailor_and_concat(x.flip(dims=(2, 3, 4)), model).flip(dims=(2, 3, 4)), 1)  # flip H, W, D
+            output = logit / 8.0  # mean
+
+        output = output[0, :, :H, :W, :T].cpu().detach().numpy()
+        output = output.argmax(0)
+        dices = softmax_output_dice(output, target.cpu().numpy())
+        dices_all.append(dices)
+       
+        print(dices)
+        with open(fname + '.txt', 'a+') as f:
+            f.write(str(dices[0])+' ' + str(dices[1]) + ' ' + str(dices[2]) + '\n')
+        f.close()
+
+        name = str(i)
+        if names:
+            name = names[i]
+            msg += '{:>20}, '.format(name)
+
+        print(msg)
+
+        if savepath:
+            # .npy for further model ensemble
+            # .nii for directly model submission
+            assert save_format in ['npy', 'nii']
+            if save_format == 'npy':
+                np.save(os.path.join(savepath, name + '_preds'), output)
+            if save_format == 'nii':
+                # raise NotImplementedError
+                oname = os.path.join(savepath, name + '.nii.gz')
+                seg_img = np.zeros(shape=(H, W, T), dtype=np.uint8)
+
+                seg_img[np.where(output == 1)] = 1
+                seg_img[np.where(output == 2)] = 2
+                seg_img[np.where(output == 3)] = 4
+                if verbose:
+                    print('1:', np.sum(seg_img == 1), ' | 2:', np.sum(seg_img == 2), ' | 4:', np.sum(seg_img == 4))
+                    print('WT:', np.sum((seg_img == 1) | (seg_img == 2) | (seg_img == 4)), ' | TC:',
+                          np.sum((seg_img == 1) | (seg_img == 4)), ' | ET:', np.sum(seg_img == 4))
+                nib.save(nib.Nifti1Image(seg_img, None), oname)
+                print('Successfully save {}'.format(oname))
+
+                if snapshot:
+                    """ --- grey figure---"""
+                    # Snapshot_img = np.zeros(shape=(H,W,T),dtype=np.uint8)
+                    # Snapshot_img[np.where(output[1,:,:,:]==1)] = 64
+                    # Snapshot_img[np.where(output[2,:,:,:]==1)] = 160
+                    # Snapshot_img[np.where(output[3,:,:,:]==1)] = 255
+                    """ --- colorful figure--- """
+                    Snapshot_img = np.zeros(shape=(H, W, 3, T), dtype=np.uint8)
+                    Snapshot_img[:, :, 0, :][np.where(output == 1)] = 255
+                    Snapshot_img[:, :, 1, :][np.where(output == 2)] = 255
+                    Snapshot_img[:, :, 2, :][np.where(output == 3)] = 255
+
+                    for frame in range(T):
+                        if not os.path.exists(os.path.join(visual, name)):
+                            os.makedirs(os.path.join(visual, name))
+                        # scipy.misc.imsave(os.path.join(visual, name, str(frame)+'.png'), Snapshot_img[:, :, :, frame])
+                        imageio.imwrite(os.path.join(visual, name, str(frame)+'.png'), Snapshot_img[:, :, :, frame])
+    
+    dices_all = np.array(dices_all)
+    mean_dices = np.mean(dices_all, axis=0)
+   
+    print("Mean dice for each class: ", mean_dices)
+    
+    print('runtimes:', sum(runtimes)/len(runtimes))
+
 
 
 def validate_softmax(
@@ -254,7 +484,7 @@ def validate_softmax(
         valid_in_train=False,  # if you are valid when train
         ):
 
-    H, W, T = 240, 240, 160
+    H, W, T = 240, 240, 155
     model.eval()
 
     runtimes = []
@@ -327,7 +557,7 @@ def validate_softmax(
 
         output = output[0, :, :H, :W, :T].cpu().detach().numpy()
         output = output.argmax(0)
-
+        print(target.shape, output.shape)
         name = str(i)
         if names:
             name = names[i]
@@ -373,6 +603,5 @@ def validate_softmax(
                             os.makedirs(os.path.join(visual, name))
                         # scipy.misc.imsave(os.path.join(visual, name, str(frame)+'.png'), Snapshot_img[:, :, :, frame])
                         imageio.imwrite(os.path.join(visual, name, str(frame)+'.png'), Snapshot_img[:, :, :, frame])
-
 
     print('runtimes:', sum(runtimes)/len(runtimes))

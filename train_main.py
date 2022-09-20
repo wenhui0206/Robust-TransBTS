@@ -15,9 +15,11 @@ from models.TransBTS.TransBTS_downsample8x_skipconnection import TransBTS
 import torch.distributed as dist
 from models import criterions
 
-from data.BraTS import BraTS
+from data.BraTS import BraTS, BraTS_noisy
 from torch.utils.data import DataLoader
 from utils.tools import all_reduce_tensor
+from losses import BetaCrossEnropyError, GeneralizedCrossEntropy
+import losses
 # from tensorboardX import SummaryWriter
 from torch import nn
 
@@ -40,6 +42,8 @@ parser.add_argument('--description',
 
 # DataSet Information
 parser.add_argument('--root', default='/scratch/wenhuicu/brats_preprocessed/', type=str)
+
+parser.add_argument('--ckpoint_root', default='/scratch/wenhuicu/TransBTS_outputs/')
 
 parser.add_argument('--train_dir', default='', type=str)
 
@@ -80,7 +84,7 @@ parser.add_argument('--weight_decay', default=1e-5, type=float)
 
 parser.add_argument('--amsgrad', default=True, type=bool)
 
-parser.add_argument('--criterion', default='softmax_dice', type=str)
+parser.add_argument('--criterion', default='BetaCrossEnropyError', type=str)
 
 parser.add_argument('--num_class', default=4, type=int)
 
@@ -88,17 +92,17 @@ parser.add_argument('--seed', default=1000, type=int)
 
 parser.add_argument('--no_cuda', default=False, type=bool)
 
-parser.add_argument('--gpu', default='0,1', type=str)
+parser.add_argument('--gpu', default='0,1,2,3', type=str)
 
 parser.add_argument('--num_workers', default=8, type=int)
 
-parser.add_argument('--batch_size', default=2, type=int)
+parser.add_argument('--batch_size', default=4, type=int)
 
 parser.add_argument('--start_epoch', default=0, type=int)
 
 parser.add_argument('--end_epoch', default=1000, type=int)
 
-parser.add_argument('--save_freq', default=50, type=int)
+parser.add_argument('--save_freq', default=100, type=int)
 
 parser.add_argument('--resume', default='', type=str)
 
@@ -106,12 +110,18 @@ parser.add_argument('--load', default=True, type=bool)
 
 parser.add_argument('--local_rank', default=0, type=int, help='node rank for distributed training')
 
+parser.add_argument('--corrupt_r', default=0.0, type=float, help='rate of corrupted labels to be used during training')
+
+parser.add_argument('--beta', default=0.0, type=float, help='hyper-parameter beta for robust loss')
+
+parser.add_argument('--pct_train', default=1.0, type=float, help='percentage of training samples used for producing pesuedo labels.')
+
 args = parser.parse_args()
 
 
 def main_worker():
     if args.local_rank == 0:
-        log_dir = os.path.join(os.path.abspath(os.path.dirname(__file__)), 'log', args.experiment + args.date)
+        log_dir = os.path.join(args.ckpoint_root, 'log', args.experiment + args.date)
         log_file = log_dir + '.txt'
         log_args(log_file)
         logging.info('--------------------------------------This is all argsurations----------------------------------')
@@ -124,26 +134,36 @@ def main_worker():
     torch.cuda.manual_seed(args.seed)
     random.seed(args.seed)
     np.random.seed(args.seed)
-    # torch.distributed.init_process_group('nccl')
+    torch.distributed.init_process_group('nccl')
     torch.cuda.set_device(args.local_rank)
 
     _, model = TransBTS(dataset='brats', _conv_repr=True, _pe_type="learned")
 
     model.cuda(args.local_rank)
-    # model = nn.parallel.DistributedDataParallel(model, device_ids=[args.local_rank], output_device=args.local_rank, find_unused_parameters=True)
+    model = nn.parallel.DistributedDataParallel(model, device_ids=[args.local_rank], output_device=args.local_rank, find_unused_parameters=True)
     model.train()
 
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay, amsgrad=args.amsgrad)
 
-    criterion = getattr(criterions, args.criterion)
+    # criterion = getattr(criterions, args.criterion)
+    
+    #======================Define Loss Function here==========
+    flatten_func = getattr(criterions, 'flatten')
+    if args.beta > 0:
+        criterion = getattr(losses, args.criterion)(args.num_class)
+        print(criterion)
+        # criterion = BetaCrossEnropyError(args.num_class, scale=1.0, beta=args.beta)
+        # criterion = GeneralizedCrossEntropy(args.num_class, q=args.beta)
+    else:
+        criterion = torch.nn.CrossEntropyLoss()
 
     if args.local_rank == 0:
-        checkpoint_dir = os.path.join(os.path.abspath(os.path.dirname(__file__)), 'checkpoint', args.experiment+args.date)
+        checkpoint_dir = os.path.join(args.ckpoint_root, 'checkpoint', args.experiment)
         if not os.path.exists(checkpoint_dir):
             os.makedirs(checkpoint_dir)
 
-    resume = ''
-
+    resume = args.resume
+    
     # writer = SummaryWriter()
 
     if os.path.isfile(resume) and args.load:
@@ -159,53 +179,75 @@ def main_worker():
 
     train_list = os.path.join(args.root, args.train_dir, args.train_file)
     train_root = os.path.join(args.root, args.train_dir)
+    
+    ##==================================Create Dataset===========================
+    names = []
+    with open(train_list) as f:
+        for line in f:
+            line = line.strip()
+            name = line.split('/')[-1]
+            names.append(name)
+    total_num = len(names)
 
-    train_set = BraTS(train_list, train_root, args.mode)
-    # train_sampler = torch.utils.data.distributed.DistributedSampler(train_set)
+    if(args.corrupt_r > 0):
+        # random.shuffle(names) # should I random shuffle here? So each training, the noisy labels would be different. You shouldn't, in that way, after adding robust loss, it would be different training noisy labels.
+        num_crpt = int(total_num * args.corrupt_r)
+        train_noisy_set = BraTS_noisy(names[: num_crpt], train_root, args.mode, args.corrupt_r)
+        train_gt_set = BraTS(names[num_crpt: ], train_root, args.mode)
+        train_set = torch.utils.data.ConcatDataset([train_gt_set, train_noisy_set])
+    else:
+        if args.pct_train < 1:
+            train_set = BraTS(names[int(total_num*(1.0 - args.pct_train)): ], train_root, args.mode) # the second part training set is gt when training.
+        else:
+            train_set = BraTS(names, train_root, args.mode)
+
+    ##===============================
+    train_sampler = torch.utils.data.distributed.DistributedSampler(train_set)
     # train_sampler = torch.utils.data.BatchSampler(train_set)
     logging.info('Samples for train = {}'.format(len(train_set)))
 
-    num_gpu = (len(args.gpu)+1) // 2
+    # num_gpu = (len(args.gpu)+1) // 2
+    num_gpu = 2
 
-    # train_loader = DataLoader(dataset=train_set, sampler=train_sampler, batch_size=args.batch_size // num_gpu,
-    #                           drop_last=True, num_workers=args.num_workers, pin_memory=True)
+    train_loader = DataLoader(dataset=train_set, sampler=train_sampler, batch_size=args.batch_size // num_gpu,
+                              drop_last=True, num_workers=args.num_workers, pin_memory=True)
     
 
-    train_loader = DataLoader(dataset=train_set, shuffle=True, batch_size=args.batch_size,
-                              drop_last=True, num_workers=args.num_workers, pin_memory=True)
+    # train_loader = DataLoader(dataset=train_set, shuffle=True, batch_size=args.batch_size,
+    #                           drop_last=True, num_workers=args.num_workers, pin_memory=True)
 
     start_time = time.time()
 
     torch.set_grad_enabled(True)
 
     for epoch in range(args.start_epoch, args.end_epoch):
-        # train_sampler.set_epoch(epoch)  # shuffle
+        train_sampler.set_epoch(epoch)  # shuffle
         # setproctitle.setproctitle('{}: {}/{}'.format(args.user, epoch+1, args.end_epoch))
         start_epoch = time.time()
 
         for i, data in enumerate(train_loader):
 
             adjust_learning_rate(optimizer, epoch, args.end_epoch, args.lr)
-
             x, target = data
+            
             x = x.cuda(args.local_rank, non_blocking=True)
             target = target.cuda(args.local_rank, non_blocking=True)
-
+            
             output = model(x)
 
-            loss, loss1, loss2, loss3 = criterion(output, target)
-            # reduce_loss = all_reduce_tensor(loss, world_size=num_gpu).data.cpu().numpy()
+            # loss, loss1, loss2, loss3 = criterion(output, target)
+            ##=========================================
+            target[target == 4] = 3
+            loss = criterion(flatten_func(output).permute((1, 0)), torch.flatten(target))
+            ##==========================================
+            reduce_loss = all_reduce_tensor(loss, world_size=num_gpu).data.cpu().numpy()
             # reduce_loss1 = all_reduce_tensor(loss1, world_size=num_gpu).data.cpu().numpy()
             # reduce_loss2 = all_reduce_tensor(loss2, world_size=num_gpu).data.cpu().numpy()
             # reduce_loss3 = all_reduce_tensor(loss3, world_size=num_gpu).data.cpu().numpy()
-            reduce_loss = loss
-            reduce_loss1 = loss1
-            reduce_loss2 = loss2
-            reduce_loss3 = loss3
 
             if args.local_rank == 0:
-                logging.info('Epoch: {}_Iter:{}  loss: {:.5f} || 1:{:.4f} | 2:{:.4f} | 3:{:.4f} ||'
-                             .format(epoch, i, reduce_loss, reduce_loss1, reduce_loss2, reduce_loss3))
+                logging.info('Epoch: {}_Iter:{}  loss: {:.5f}'
+                             .format(epoch, i, reduce_loss))
 
             optimizer.zero_grad()
             loss.backward()
