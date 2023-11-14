@@ -328,7 +328,9 @@ def compare_performance(
         visual='',  # the path to save visualization
         postprocess=False,  # Default False, when use postprocess, the score of dice_ET would be changed.
         valid_in_train=False,  # if you are valid when train
-        fname='dice.txt'):
+        fname='dice.txt',
+        csv_name='results.csv',
+        fp="/scratch1/wenhuicu/robust_seg/TransBTS_outputs/csv_results/"):
 
 
     H, W, T = 240, 240, 155
@@ -337,6 +339,7 @@ def compare_performance(
     runtimes = []
     ET_voxels_pred_list = []
     dices_all = []
+    hds = []
     
     for i, data in enumerate(valid_loader):
         print('-------------------------------------------------------------------')
@@ -407,7 +410,12 @@ def compare_performance(
         output = output.argmax(0)
         dices = softmax_output_dice(output, target.cpu().numpy())
         dices_all.append(dices)
-       
+
+        target = target.cpu().numpy()[0]
+        [hd_whole, hd_core, hd_en] = hausdorff_whole(output, target), hausdorff_core(output, target), hausdorff_en(output, target)
+        
+        hds.append([hd_whole, hd_core, hd_en])
+
         print(dices)
         with open(fname + '.txt', 'a+') as f:
             f.write(str(dices[0])+' ' + str(dices[1]) + ' ' + str(dices[2]) + '\n')
@@ -461,10 +469,16 @@ def compare_performance(
     
     dices_all = np.array(dices_all)
     mean_dices = np.mean(dices_all, axis=0)
+    mean_hds = np.mean(np.array(hds), axis=0)
    
     print("Mean dice for each class: ", mean_dices)
-    
+
+    if csv_name != '':
+        df = pd.DataFrame(np.concatenate((mean_dices, mean_hds)).reshape((1, 6)), columns=["WT dice", "TC dice", "ET dice", "WT hd", "TC hd", "ET hd"])
+        df.to_csv(fp + csv_name)
+        
     print('runtimes:', sum(runtimes)/len(runtimes))
+
 
 
 
