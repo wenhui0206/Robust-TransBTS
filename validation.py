@@ -119,9 +119,9 @@ def main():
     print('Samples for valid = {}'.format(len(valid_set)))
 
     valid_loader = DataLoader(valid_set, batch_size=1, shuffle=False, num_workers=args.num_workers, pin_memory=True)
+
     if args.submission != '':
-	    submission = os.path.join(prefix, args.output_dir,
-                              args.submission, args.experiment)
+	    submission = os.path.join(prefix, args.output_dir, args.submission, args.experiment)
     else:
 	    submission = ''
     visual = os.path.join(prefix, args.output_dir,
@@ -135,21 +135,7 @@ def main():
     start_time = time.time()
 
     with torch.no_grad():
-        # compare_performance(valid_loader=valid_loader,
-        #                  model=model,
-        #                  load_file=load_file,
-        #                  multimodel=False,
-        #                  savepath=submission,
-        #                  visual=visual,
-        #                  names=valid_set.names,
-        #                  use_TTA=args.use_TTA, # test time augmentation. set false as default
-        #                  save_format=args.save_format,
-        #                  snapshot=False,
-        #                  postprocess=True,
-        #                  valid_in_train=True,
-        #                  fname=args.experiment[6:]
-        #                  )
-        validate_performance(valid_loader=valid_loader,
+        compare_performance(valid_loader=valid_loader,
                          model=model,
                          load_file=load_file,
                          multimodel=False,
@@ -161,8 +147,24 @@ def main():
                          snapshot=False,
                          postprocess=True,
                          valid_in_train=True,
+                         fname=args.output_root + args.experiment,
                          csv_name=args.csv_name,
-                        fp=args.output_root + 'csv_results/')
+                         fp=args.output_root + 'csv_results/'
+                         )
+        # validate_performance(valid_loader=valid_loader,
+        #                  model=model,
+        #                  load_file=load_file,
+        #                  multimodel=False,
+        #                  savepath=submission,
+        #                  visual=visual,
+        #                  names=valid_set.names,
+        #                  use_TTA=args.use_TTA, # test time augmentation. set false as default
+        #                  save_format=args.save_format,
+        #                  snapshot=False,
+        #                  postprocess=True,
+        #                  valid_in_train=True,
+        #                  csv_name=args.csv_name,
+        #                 fp=args.output_root + 'csv_results/')
         # validate_softmax(valid_loader=valid_loader,
         #                  model=model,
         #                  load_file=load_file,
