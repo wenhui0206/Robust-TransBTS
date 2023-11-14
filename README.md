@@ -5,8 +5,8 @@ This is the implementation of the paper:  [Semi-supervised Learning using Robust
 This repo is forked from the official implementation for [TransBTS: Multimodal Brain Tumor Segmentation Using Transformer](https://arxiv.org/pdf/2103.04430.pdf). The multimodal brain tumor datasets (BraTS 2019 & BraTS 2020) could be acquired from [here](https://ipp.cbica.upenn.edu/).
 
 ## Python Scripts
-- python -m torch.distributed.launch --nproc_per_node=2 train_cv.py --corrupt_r=0.0 --train_partial=False --beta=0.0 --experiment='Upperbound_lw' --fold=0
-- python /scratch1/wenhuicu/robust_seg/TransBTS/validation.py --test_file='model_epoch_last.pth' --valid_file='test_list.txt' --submission='' --experiment='Upperbound_lw.5_f0' --csv_name='Upperbound_lw_f0.csv'
+- `python -m torch.distributed.launch --nproc_per_node=2 train_cv.py --corrupt_r=0.0 --train_partial=False --beta=0.0 --experiment='Upperbound_lw' --fold=0`
+- `python /scratch1/wenhuicu/robust_seg/TransBTS/validation.py --test_file='model_epoch_last.pth' --valid_file='test_list.txt' --submission='' --experiment='Upperbound_lw.5_f0' --csv_name='Upperbound_lw_f0.csv' `
   
 ### TransBTS
 ![TransBTS](https://github.com/Wenxuan-1119/TransBTS/blob/main/figure/TransBTS.PNG "TransBTS")
