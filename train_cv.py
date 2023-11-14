@@ -116,13 +116,17 @@ parser.add_argument('--corrupt_r', default=0.0, type=float, help='rate of corrup
 
 parser.add_argument('--beta', default=0.0, type=float, help='hyper-parameter beta for robust loss')
 
-parser.add_argument('--pct_train', default=1.0, type=float, help='percentage of training samples used for producing pesuedo labels.')
+parser.add_argument('--train_partial', default=False, type=bool, help='only train on a percentage of the training data, used during training baseline. only train on samples with gt labels.')
 
-parser.add_argument('--start_i', default=1, type=int, help='train wth differen folds.')
-parser.add_argument('--end_i', default=1, type=int, help='train wth differen folds.')
-parser.add_argument('--fold', default=1, type=int, help='train wth differen folds.')
+parser.add_argument('--start_i', default=1, type=int, help='noisy samples start_i')
+parser.add_argument('--end_i', default=1, type=int, help='noisy samples end index, start-end is number of noisy samples')
+parser.add_argument('--fold', default=0, type=int, help='train wth differen folds.')
+
 args = parser.parse_args()
 
+cv_fold_inds = {0.3: {0:(0, 60), 1:(61, 121), 2:(121, 181)}, 0.5 : {0:(0, 100), 1:(50, 150), 2:(100, 200)}, 0.7 : {0:(0, 140), 1:(30, 170), 2:(60, 200)}}
+
+pct_train = 1.0 - args.corrupt_r
 
 def main_worker():
     if args.local_rank == 0:
@@ -193,21 +197,21 @@ def main_worker():
             names.append(name)
     total_num = len(names)
 
-    if(args.corrupt_r > 0):
+    if args.corrupt_r > 0:
+        start_i = cv_fold_inds[args.corrupt_r][args.fold][0]
+        end_i = cv_fold_inds[args.corrupt_r][args.fold][1]
         # random.shuffle(names) # should I random shuffle here? So each training, the noisy labels would be different. You shouldn't, in that way, after adding robust loss, it would be different training noisy labels.
-        # num_crpt = int(total_num * args.corrupt_r)
-        train_noisy_set = BraTS_noisy(names[args.start_i : args.end_i], train_root, args.mode, args.corrupt_r, args.fold)
-        train_gt_set = BraTS(names[:args.start_i] + names[args.end_i:], train_root, args.mode)
-        print(len(train_noisy_set))
-        train_set = torch.utils.data.ConcatDataset([train_gt_set, train_noisy_set])
-    else:
-        if args.pct_train < 1:
-            # rest_num = int(total_num*(1.0 - pct_train))
-            # train_num = int(total_num*pct_train)
-            train_set = BraTS(names[:args.start_i] + names[args.end_i:], train_root, args.mode) # the second part training set is gt when training.
-
+        if args.train_partial == False:
+            train_noisy_set = BraTS_noisy(names[start_i : end_i], train_root, args.mode, args.corrupt_r, args.fold)
+            train_gt_set = BraTS(names[:start_i] + names[end_i:], train_root, args.mode)
+            print(len(train_noisy_set))
+            train_set = torch.utils.data.ConcatDataset([train_gt_set, train_noisy_set])
         else:
-            train_set = BraTS(names, train_root, args.mode)
+            # the second part training set is gt when training.
+            train_set = BraTS(names[:start_i] + names[end_i:], train_root, args.mode)
+    else:
+         train_set = BraTS(names, train_root, args.mode)
+
 
     ##===============================
     train_sampler = torch.utils.data.distributed.DistributedSampler(train_set)
