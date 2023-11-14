@@ -212,23 +212,23 @@ def main_worker():
     if args.train_partial==False:
         # random.shuffle(names) # should I random shuffle here? So each training, the noisy labels would be different. You shouldn't, in that way, after adding robust loss, it would be different training noisy labels.
         # num_crpt = int(total_num * args.corrupt_r)
-        train_noisy_set = BraTS_noisy(names[start_i : end_i], train_root, args.mode, args.corrupt_r, args.fold)
-        train_gt_set = BraTS(names[:start_i] + names[end_i:], train_root, args.mode)
-        # print(len(train_noisy_set))
-        train_noisy_sampler = torch.utils.data.distributed.DistributedSampler(train_noisy_set)
+        if args.corrupt_r > 0:
+            train_noisy_set = BraTS_noisy(names[start_i : end_i], train_root, args.mode, args.corrupt_r, args.fold)
+            train_gt_set = BraTS(names[:start_i] + names[end_i:], train_root, args.mode)
+            # print(len(train_noisy_set))
+            train_noisy_sampler = torch.utils.data.distributed.DistributedSampler(train_noisy_set)
 
-        train_noisy_loader = DataLoader(dataset=train_noisy_set, sampler=train_noisy_sampler, batch_size=args.batch_size//4, drop_last=True, num_workers=args.num_workers, pin_memory=True)
+            train_noisy_loader = DataLoader(dataset=train_noisy_set, sampler=train_noisy_sampler, batch_size=args.batch_size//4, drop_last=True, num_workers=args.num_workers, pin_memory=True)
 
-        train_gt_sampler = torch.utils.data.distributed.DistributedSampler(train_gt_set)
+            train_gt_sampler = torch.utils.data.distributed.DistributedSampler(train_gt_set)
 
-        train_gt_loader = DataLoader(dataset=train_gt_set, sampler=train_gt_sampler, batch_size=args.batch_size//4, drop_last=True, num_workers=args.num_workers, pin_memory=True)
-        train_set = torch.utils.data.ConcatDataset([train_gt_set, train_noisy_set])
-    else:
-        if pct_train < 1:
-            train_set = BraTS(names[:start_i] + names[end_i:], train_root, args.mode) # the second part training set is gt when training.
-
+            train_gt_loader = DataLoader(dataset=train_gt_set, sampler=train_gt_sampler, batch_size=args.batch_size//4, drop_last=True, num_workers=args.num_workers, pin_memory=True)
+            train_set = torch.utils.data.ConcatDataset([train_gt_set, train_noisy_set])
         else:
             train_set = BraTS(names, train_root, args.mode)
+    else:
+        train_set = BraTS(names[:start_i] + names[end_i:], train_root, args.mode) # the second part training set is gt when training.
+
 
     ##===============================
     train_sampler = torch.utils.data.distributed.DistributedSampler(train_set)
