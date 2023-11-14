@@ -1,7 +1,10 @@
-# TransBTS: Multimodal Brain Tumor Segmentation Using Transformer（MICCAI2021）
-This repo is the official implementation for [TransBTS: Multimodal Brain Tumor Segmentation Using Transformer](https://arxiv.org/pdf/2103.04430.pdf). The multimodal brain tumor datasets (BraTS 2019 & BraTS 2020) could be acquired from [here](https://ipp.cbica.upenn.edu/).
+# Semi-supervised Learning using Robust Loss
 
-## TransBTS
+This is the implementation of the paper:  [Semi-supervised Learning using Robust Los](https://arxiv.org/abs/2203.01524)
+
+This repo is forked from the official implementation for [TransBTS: Multimodal Brain Tumor Segmentation Using Transformer](https://arxiv.org/pdf/2103.04430.pdf). The multimodal brain tumor datasets (BraTS 2019 & BraTS 2020) could be acquired from [here](https://ipp.cbica.upenn.edu/).
+
+### TransBTS
 ![TransBTS](https://github.com/Wenxuan-1119/TransBTS/blob/main/figure/TransBTS.PNG "TransBTS")
 Architecture of 3D TransBTS.
 
