@@ -33,8 +33,6 @@ Run the training script on BraTS dataset. Distributed training is available for 
 
 - train_cps.py implements [cross pseudo supervision](https://github.com/charlesCXK/TorchSemiSeg/tree/f67b37362ad019570fe48c5884187ea85f2cc045). For comparison with robust loss, it is based on train_cv.py
 
-- train_2losses.py tried to use ce loss for gt labels, robust loss for pseudo labels. But the results were not improving.
-
 
 `python -m torch.distributed.launch --nproc_per_node=2 train_cv.py`
 
